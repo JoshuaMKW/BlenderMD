@@ -1,23 +1,40 @@
+import subprocess
+import sys
+from os import getenv
+from pathlib import Path
+
+import bpy
+from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
+from bpy_extras.io_utils import ExportHelper
+
 bl_info = {
     "name": "Export BMD with SuperBMD",
     "author": "Augs",
-    "version": (2, 1, 3),
-    "blender": (2, 71, 0),
+    "version": (2, 2, 0),
+    "blender": (2, 80, 0),
     "location": "File > Export > Gamecube/Wii model (.bmd)",
     "description": "This script allows you do export bmd files quickly using SuperBMD directly from blender",
     "warning": "Will overwrite an fbx file of the same name as the bmd that you are exporting",
     "category": "Import-Export"
 }
 
-import bpy
-import os
 
-from bpy_extras.io_utils import ExportHelper
-from bpy.props import (BoolProperty,
-    FloatProperty,
-    StringProperty,
-    EnumProperty,
+class BMDPathPreference(bpy.types.AddonPreferences):
+    bl_idname = __name__
+
+    superPath: bpy.props.StringProperty(
+        name="Path",
+        description="Path to SuperBMD.exe",
+        default="",
+        maxlen=255,
+        subtype="FILE_PATH"
     )
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text='Path to SuperBMD.exe')
+        row = layout.row()
+        row.prop(self, 'superPath', expand=True)
 
 class ExportBMD(bpy.types.Operator, ExportHelper):
     """Save an BMD Mesh file"""
@@ -30,51 +47,62 @@ class ExportBMD(bpy.types.Operator, ExportHelper):
 
     check_extension = True
     filename_ext = ".bmd"
-	
-    rot = BoolProperty(
+
+    rot: BoolProperty(
         name="Rotate",
         description="Use Z as up instead of Y",
         default=True,
-        )
-		
-    OtherParams = StringProperty(
+    )
+
+    otherParams: StringProperty(
         name="Other parameters",
         description="stuff like -t -s that you add to the cmd command",
         default="",
     )
-	
-    SuperPath = StringProperty(
-        name="SuperBMDPath",
-        description="The path of folder containing SuperBMD.exe",
-        default="C:\\Users\\August\\Downloads\\Sunshine ROM hacking\\SuperBMD\\", #bad!!! must find better way
-    )	
-	
-	#To do: add material presets
-	
-    def execute(self, context):        # execute() is called by blender when running the operator.
-        FBXPath = (self.filepath[:-3] + "fbx") #dodgy hey, changed file extension
-        bpy.ops.export_scene.fbx(filepath=FBXPath, path_mode='ABSOLUTE') #Export out model as fbx
-        Parameters = "" #Stuff like mat and that
-        if(self.rot):
-            Parameters = "--rotate"
-        Parameters = Parameters + self.OtherParams
-        os.chdir(self.SuperPath) #Change path
-        os.system("SuperBMD.exe " + '"' + FBXPath + '" ' + Parameters)
-        os.system("del " + '"' + FBXPath + '"') #delete fbx
-        return {'FINISHED'}            # this lets blender know the operator finished successfully.
-	
+
+    # To do: add material presets
+
+    # execute() is called by blender when running the operator.
+    def execute(self, context):
+        fbxPath = Path(self.filepath).with_suffix(
+            ".fbx")  # dodgy hey, changed file extension
+        superPath = Path(context.preferences.addons[__name__].preferences.superPath)
+        # Export out model as fbx
+        bpy.ops.export_scene.fbx(filepath=str(fbxPath), path_mode="ABSOLUTE")
+
+        parameters = ""  # Stuff like mat and that
+        if self.rot:
+            parameters = "--rotate"
+        parameters += f" {self.otherParams}"
+        parameters = parameters.strip().split(" ")
+
+        subprocess.Popen([f'"{superPath}"', f'"{fbxPath}"', *parameters])
+        fbxPath.unlink()
+        # this lets blender know the operator finished successfully.
+        return {"FINISHED"}
+
+
+__classes__ = (ExportBMD,
+               BMDPathPreference)  # list of classes to register/unregister
 
 
 def register():
-    bpy.utils.register_class(ExportBMD)
-    bpy.types.INFO_MT_file_export.append(menu_func)
+    from bpy.utils import register_class, unregister_class
+    for cls in __classes__:
+        register_class(cls)
+    bpy.types.TOPBAR_MT_file_export.append(menu_export)  # Add to export menu
 
-def menu_func(self, context):
-    self.layout.operator(ExportBMD.bl_idname, text="Gamecuebe/Wii model (.bmd)")
-    
+
+def menu_export(self, context):
+    self.layout.operator(ExportBMD.bl_idname,
+                         text="Gamecube/Wii model (.bmd)")
+
+
 def unregister():
-    bpy.utils.unregister_class(ExportBMD)
-    bpy.types.INFO_MT_file_export.remove(menu_func)
+    from bpy.utils import register_class, unregister_class
+    for cls in reversed(__classes__):
+        unregister_class(cls)
+    bpy.types.TOPBAR_MT_file_export.remove(menu_export)
 
 
 # This allows you to run the script directly from blenders text editor
