@@ -1,11 +1,13 @@
 import subprocess
 import sys
+import tempfile
 from os import getenv
+from os import sep as PATH_SEP
 from pathlib import Path
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
-from bpy_extras.io_utils import ExportHelper
+from bpy_extras.io_utils import ExportHelper, ImportHelper
 
 bl_info = {
     "name": "Export BMD with SuperBMD",
@@ -36,6 +38,35 @@ class BMDPathPreference(bpy.types.AddonPreferences):
         row = layout.row()
         row.prop(self, 'superPath', expand=True)
 
+
+class ImportBMD(bpy.types.Operator, ImportHelper):
+    """Save an BMD Mesh file"""
+    bl_idname = "import_mesh.bmd"
+    bl_label = "Import BMD Mesh"
+    filter_glob = StringProperty(
+        default="*.bmd",
+        options={"HIDDEN"},
+    )
+
+    check_extension = True
+    filename_ext = ".bmd"
+
+    # execute() is called by blender when running the operator.
+    def execute(self, context):
+        bmdPath = Path(self.filepath)
+        dest = Path(tempfile.gettempdir(), "BlenderMD", bmdPath.stem + ".dae").resolve()
+        dest.mkdir(parents=True, exist_ok=True)
+        superPath = Path(context.preferences.addons[__name__].preferences.superPath)
+
+        subprocess.run([str(superPath), str(bmdPath), str(dest)])
+
+        # Import our .dae model
+        bpy.ops.wm.collada_import(filepath=str(dest))
+
+        # this lets blender know the operator finished successfully.
+        return {"FINISHED"}
+
+
 class ExportBMD(bpy.types.Operator, ExportHelper):
     """Save an BMD Mesh file"""
     bl_idname = "export_mesh.bmd"
@@ -64,11 +95,11 @@ class ExportBMD(bpy.types.Operator, ExportHelper):
 
     # execute() is called by blender when running the operator.
     def execute(self, context):
-        fbxPath = Path(self.filepath).with_suffix(
-            ".fbx")  # dodgy hey, changed file extension
+        fbxPath = Path(self.filepath).with_suffix(".fbx")
         superPath = Path(context.preferences.addons[__name__].preferences.superPath)
+
         # Export out model as fbx
-        bpy.ops.export_scene.fbx(filepath=str(fbxPath), path_mode="ABSOLUTE")
+        bpy.ops.export_scene.fbx(filepath=str(fbxPath))
 
         parameters = ""  # Stuff like mat and that
         if self.rot:
@@ -76,13 +107,14 @@ class ExportBMD(bpy.types.Operator, ExportHelper):
         parameters += f" {self.otherParams}"
         parameters = parameters.strip().split(" ")
 
-        subprocess.Popen([f'"{superPath}"', f'"{fbxPath}"', *parameters])
+        subprocess.run([str(superPath), str(fbxPath), *parameters])
         fbxPath.unlink()
         # this lets blender know the operator finished successfully.
         return {"FINISHED"}
 
 
-__classes__ = (ExportBMD,
+__classes__ = (ImportBMD,
+               ExportBMD,
                BMDPathPreference)  # list of classes to register/unregister
 
 
@@ -90,7 +122,13 @@ def register():
     from bpy.utils import register_class, unregister_class
     for cls in __classes__:
         register_class(cls)
+    bpy.types.TOPBAR_MT_file_import.append(menu_import)  # Add to export menu
     bpy.types.TOPBAR_MT_file_export.append(menu_export)  # Add to export menu
+
+
+def menu_import(self, context):
+    self.layout.operator(ImportBMD.bl_idname,
+                         text="Gamecube/Wii model (.bmd)")
 
 
 def menu_export(self, context):
@@ -102,6 +140,7 @@ def unregister():
     from bpy.utils import register_class, unregister_class
     for cls in reversed(__classes__):
         unregister_class(cls)
+    bpy.types.TOPBAR_MT_file_import.remove(menu_import)
     bpy.types.TOPBAR_MT_file_export.remove(menu_export)
 
 
